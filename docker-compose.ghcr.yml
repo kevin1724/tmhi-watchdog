@@ -1,0 +1,16 @@
+services:
+  tmhi-watchdog:
+    image: ghcr.io/kevin1724/tmhi-watchdog:latest
+    pull_policy: always
+    container_name: tmhi-watchdog
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8088:8000"
+    volumes:
+      - ./data:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

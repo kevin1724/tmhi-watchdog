@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: HINT Control upstream project
+    url: https://github.com/zacharee/HINTControl
+    about: Report issues with the HINT Control application itself to its upstream repository.

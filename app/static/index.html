@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TMHI Gateway Watchdog</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">TMHI Gateway</p>
+        <h1>Watchdog Console</h1>
+      </div>
+      <div class="topbar__status">
+        <span id="phasePill" class="phase-pill phase-pill--unknown">Initializing</span>
+        <span id="updatedAt" class="muted">Not refreshed</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel panel--wide" aria-labelledby="statusHeading">
+        <div class="panel__header">
+          <h2 id="statusHeading">Status</h2>
+          <button id="refreshButton" class="button button--secondary" type="button">
+            Refresh
+          </button>
+        </div>
+        <div class="metric-grid">
+          <div class="metric">
+            <span>Internet</span>
+            <strong id="internetValue">Unknown</strong>
+          </div>
+          <div class="metric">
+            <span>Probes</span>
+            <strong id="probeValue">0 / 0</strong>
+          </div>
+          <div class="metric">
+            <span>Gateway</span>
+            <strong id="gatewayValue">Unknown</strong>
+          </div>
+          <div class="metric">
+            <span>Dry run</span>
+            <strong id="dryRunValue">Unknown</strong>
+          </div>
+          <div class="metric">
+            <span>Last check</span>
+            <strong id="lastCheckValue">Never</strong>
+          </div>
+          <div class="metric">
+            <span>24h reboots</span>
+            <strong id="rebootValue">0</strong>
+          </div>
+        </div>
+        <div id="lastError" class="alert alert--hidden" role="status"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="controlsHeading">
+        <div class="panel__header">
+          <h2 id="controlsHeading">Controls</h2>
+          <span id="manualApiState" class="tag">Checking</span>
+        </div>
+
+        <div class="token-row">
+          <label for="apiToken">API token</label>
+          <input
+            id="apiToken"
+            type="password"
+            autocomplete="off"
+            placeholder="X-API-Token"
+          />
+          <button id="saveTokenButton" class="button button--secondary" type="button">
+            Save
+          </button>
+          <button id="clearTokenButton" class="button button--ghost" type="button">
+            Clear
+          </button>
+        </div>
+
+        <div class="control-grid">
+          <button id="checkButton" class="button button--primary" type="button">
+            Run check
+          </button>
+          <button id="gatewayButton" class="button button--secondary" type="button">
+            Test gateway
+          </button>
+          <label class="checkbox-line" for="forceReboot">
+            <input id="forceReboot" type="checkbox" />
+            Force
+          </label>
+          <button id="rebootButton" class="button button--danger" type="button">
+            Request reboot
+          </button>
+        </div>
+
+        <div id="actionMessage" class="message" role="status" aria-live="polite"></div>
+      </section>
+
+      <section class="panel panel--wide" aria-labelledby="seriesHeading">
+        <div class="panel__header">
+          <h2 id="seriesHeading">Connection Tests</h2>
+          <span id="seriesState" class="tag">Idle</span>
+        </div>
+
+        <form id="seriesForm" class="series-form">
+          <label for="seriesCount">
+            Tests
+            <input id="seriesCount" type="number" min="1" max="30" step="1" value="5" />
+          </label>
+          <label for="seriesInterval">
+            Seconds apart
+            <input
+              id="seriesInterval"
+              type="number"
+              min="0"
+              max="300"
+              step="1"
+              value="10"
+            />
+          </label>
+          <button id="seriesStartButton" class="button button--primary" type="submit">
+            Start tests
+          </button>
+          <button id="seriesStopButton" class="button button--secondary" type="button" disabled>
+            Stop
+          </button>
+        </form>
+
+        <div class="progress-line">
+          <progress id="seriesProgress" value="0" max="100"></progress>
+          <span id="seriesProgressText">0 / 0 complete</span>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Run</th>
+                <th>Time</th>
+                <th>Internet</th>
+                <th>Probes</th>
+                <th>Phase</th>
+              </tr>
+            </thead>
+            <tbody id="seriesResults">
+              <tr>
+                <td colspan="5" class="empty-cell">No test runs yet</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="probeHeading">
+        <div class="panel__header">
+          <h2 id="probeHeading">Probe Results</h2>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>URL</th>
+                <th>Status</th>
+                <th>Latency</th>
+              </tr>
+            </thead>
+            <tbody id="probeResults">
+              <tr>
+                <td colspan="3" class="empty-cell">No probes yet</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="configHeading">
+        <div class="panel__header">
+          <h2 id="configHeading">Configuration</h2>
+        </div>
+        <dl id="configList" class="config-list"></dl>
+      </section>
+
+      <section class="panel panel--wide" aria-labelledby="eventsHeading">
+        <div class="panel__header">
+          <h2 id="eventsHeading">Events</h2>
+          <button id="eventsButton" class="button button--secondary" type="button">
+            Reload
+          </button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Kind</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody id="eventRows">
+              <tr>
+                <td colspan="3" class="empty-cell">No events loaded</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

@@ -1,0 +1,34 @@
+name: Feature request
+description: Suggest an improvement or new supported gateway behavior
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the outage or management problem this feature would address.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Explain how you expect the feature to work.
+    validations:
+      required: true
+
+  - type: input
+    id: gateway
+    attributes:
+      label: Gateway model
+      description: Leave blank when the request is not gateway-specific.
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: This request does not require exposing gateway credentials or the management API to the public internet.
+          required: true

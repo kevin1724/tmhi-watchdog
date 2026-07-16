@@ -1,0 +1,48 @@
+name: Bug report
+description: Report a reproducible problem with TMHI Gateway Watchdog
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include your gateway password, Wi-Fi password, API token, bearer token, or public IP address.
+
+  - type: input
+    id: gateway
+    attributes:
+      label: Gateway model
+      description: "Example: Arcadyan TMOG4AR, KVD21, Sagemcom Fast 5688W, or Sercomm TMOG4SE"
+      placeholder: Arcadyan TMOG4AR
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Watchdog version or image tag
+      placeholder: latest, main, or v0.1.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Include the expected behavior and the actual behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      description: Remove all passwords, tokens, IP addresses you consider sensitive, and personal information.
+      render: shell
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Docker version, host OS, architecture, and relevant non-secret configuration.
+      placeholder: Docker 27, Ubuntu 24.04, amd64
