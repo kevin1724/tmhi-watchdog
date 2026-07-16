@@ -5,3 +5,5 @@ __pycache__/
 .pytest_cache/
 data/*.db
 data/*.db-*
+docker-compose.local.yml
+docker-compose.local.yml
