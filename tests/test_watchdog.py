@@ -2,10 +2,10 @@ from datetime import timedelta
 
 import pytest
 
-from app.config import Settings
-from app.models import ConnectivityResult, ProbeResult, RebootResult, utc_now
-from app.storage import EventStore
-from app.watchdog import Watchdog
+from tmhi_watchdog.config import Settings
+from tmhi_watchdog.models import ConnectivityResult, ProbeResult, RebootResult, utc_now
+from tmhi_watchdog.storage import EventStore
+from tmhi_watchdog.watchdog import Watchdog
 
 
 class FakeChecker:

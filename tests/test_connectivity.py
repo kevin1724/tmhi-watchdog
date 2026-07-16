@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from app.connectivity import ConnectivityChecker
+from tmhi_watchdog.connectivity import ConnectivityChecker
 
 
 @pytest.mark.asyncio

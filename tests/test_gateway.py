@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from app.gateway import GatewayAuthenticationError, UnifiedGatewayClient
+from tmhi_watchdog.gateway import GatewayAuthenticationError, UnifiedGatewayClient
 
 
 @pytest.mark.asyncio

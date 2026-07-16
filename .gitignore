@@ -1,9 +1,26 @@
+# Secrets and local configuration
 .env
+*.local.yml
+docker-compose.override.yml
+
+# Python
 .venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
-data/*.db
-data/*.db-*
-docker-compose.local.yml
-docker-compose.local.yml
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# Runtime data
+data/
+*.db
+*.db-*
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

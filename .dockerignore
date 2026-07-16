@@ -1,7 +1,12 @@
 .git
+.github
 .env
-data/
-__pycache__/
+.venv
+__pycache__
 *.py[cod]
-.pytest_cache/
-.venv/
+.pytest_cache
+tests
+docs
+data
+*.db
+*.zip

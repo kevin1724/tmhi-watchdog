@@ -8,8 +8,8 @@ def load_main(monkeypatch, tmp_path):
     monkeypatch.setenv("WATCHDOG_ENABLED", "false")
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "watchdog.db"))
     monkeypatch.setenv("API_TOKEN", "test-token")
-    sys.modules.pop("app.main", None)
-    return importlib.import_module("app.main")
+    sys.modules.pop("tmhi_watchdog.main", None)
+    return importlib.import_module("tmhi_watchdog.main")
 
 
 def test_dashboard_is_served(monkeypatch, tmp_path) -> None:
@@ -47,3 +47,45 @@ def test_check_series_endpoint(monkeypatch, tmp_path) -> None:
 
     assert response.status_code == 200
     assert response.json()["requested_count"] == 2
+
+
+def test_gateway_test_accepts_supplied_password(monkeypatch, tmp_path) -> None:
+    main = load_main(monkeypatch, tmp_path)
+    passwords: list[str] = []
+
+    class FakeGatewayClient:
+        def __init__(
+            self,
+            _base_url: str,
+            _username: str,
+            password: str,
+            _timeout_seconds: float,
+            _user_agent: str,
+        ) -> None:
+            passwords.append(password)
+
+        async def is_reachable(self) -> bool:
+            return True
+
+        async def authenticate(self) -> str:
+            return "token"
+
+        async def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(main, "UnifiedGatewayClient", FakeGatewayClient)
+
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/gateway/test",
+            headers={"X-API-Token": "test-token"},
+            json={"gateway_password": "entered-password"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "reachable": True,
+        "authenticated": True,
+        "used_supplied_password": True,
+    }
+    assert passwords == ["entered-password"]
