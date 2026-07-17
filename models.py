@@ -75,7 +75,6 @@ class Settings:
     minimum_successful_probes: int = 2
 
     database_path: str = "/data/watchdog.db"
-    api_token: str = field(default="", repr=False)
     cors_origins: tuple[str, ...] = ()
     log_level: str = "INFO"
 
@@ -117,7 +116,6 @@ class Settings:
             probe_timeout_seconds=_float("PROBE_TIMEOUT_SECONDS", 5.0, 1.0),
             minimum_successful_probes=_int("MINIMUM_SUCCESSFUL_PROBES", 2, 1),
             database_path=os.getenv("DATABASE_PATH", "/data/watchdog.db").strip(),
-            api_token=_read_secret("API_TOKEN"),
             cors_origins=cors_origins,
             log_level=os.getenv("LOG_LEVEL", "INFO").strip().upper(),
         )
@@ -160,5 +158,4 @@ class Settings:
             "probe_urls": list(self.probe_urls),
             "minimum_successful_probes": self.minimum_successful_probes,
             "database_path": self.database_path,
-            "manual_api_enabled": bool(self.api_token),
         }

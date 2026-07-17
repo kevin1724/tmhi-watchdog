@@ -19,7 +19,7 @@ tmhi-watchdog/
 ├── .github/                 CI, container publishing, and issue templates
 ├── Dockerfile               Production container image
 ├── docker-compose.yml       Recommended source-build deployment
-├── .env.example             Safe configuration template
+├── .env.example             Reference for generated settings
 └── README.md                Installation and usage guide
 ```
 

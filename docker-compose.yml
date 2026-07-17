@@ -4,8 +4,6 @@ services:
     image: tmhi-watchdog:local
     container_name: tmhi-watchdog
     restart: unless-stopped
-    env_file:
-      - .env
     ports:
       - "${WEB_PORT:-8088}:8000"
     volumes:

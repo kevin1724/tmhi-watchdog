@@ -54,7 +54,7 @@ tmhi-watchdog/
 ├── .github/                 CI and container-publishing workflows
 ├── docker-compose.yml       Recommended source deployment
 ├── Dockerfile               Container build
-└── .env.example             Safe configuration template
+└── .env.example             Reference for generated settings
 ```
 
 The organized `src/` layout prevents duplicate root-level modules and accidental imports from the wrong file.
@@ -85,44 +85,7 @@ cd tmhi-watchdog
 
 Or extract the downloaded ZIP and enter the folder.
 
-### 2. Create `.env`
-
-```bash
-cp .env.example .env
-```
-
-Generate a random API token:
-
-```bash
-TOKEN=$(openssl rand -hex 32)
-sed -i "s|^API_TOKEN=.*|API_TOKEN=$TOKEN|" .env
-```
-
-Edit the configuration:
-
-```bash
-nano .env
-```
-
-Set your real gateway administrator password:
-
-```env
-GATEWAY_HOST=192.168.12.1
-GATEWAY_PORT=8080
-GATEWAY_USERNAME=admin
-GATEWAY_PASSWORD=your-real-gateway-admin-password
-
-DRY_RUN=true
-WATCHDOG_ENABLED=true
-WEB_PORT=8088
-```
-
-Save Nano with `Ctrl+O`, press `Enter`, then exit with `Ctrl+X`.
-
-> [!WARNING]
-> `.env` must contain only comments and `NAME=value` lines. Do not paste Python code, terminal prompts, or shell commands into it. Never commit `.env` to GitHub.
-
-### 3. Validate and start
+### 2. Validate and start
 
 ```bash
 docker compose config -q
@@ -136,9 +99,9 @@ docker compose ps
 docker compose logs --tail=100 tmhi-watchdog
 ```
 
-The default Compose file uses a Docker-managed named volume. You do **not** need to create or `chown` a local `data` folder.
+The default Compose file uses a Docker-managed named volume. On first start, the app creates `/data/watchdog.env` with safe defaults and leaves `DRY_RUN=true`. You do **not** need to create a host `.env` file or `chown` a local `data` folder.
 
-### 4. Open the dashboard
+### 3. Open the dashboard
 
 On the Docker server:
 
@@ -202,6 +165,12 @@ A working connection should report:
 
 ### Test gateway reachability and login
 
+In the dashboard, enter the gateway admin password in the Gateway login row,
+leave Remember checked, then click Log in. The app saves the password to
+`/data/watchdog.env` inside the Docker data volume.
+
+From the CLI:
+
 ```bash
 docker compose exec tmhi-watchdog \
   python -m tmhi_watchdog.cli gateway-test
@@ -224,10 +193,7 @@ Expected:
 With `DRY_RUN=true`, this records the reboot decision but does not send the command:
 
 ```bash
-TOKEN=$(sed -n 's/^API_TOKEN=//p' .env)
-
 curl -sS -X POST \
-  -H "X-API-Token: $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"force":false}' \
   http://127.0.0.1:8088/api/reboot
@@ -249,22 +215,23 @@ DRY RUN: gateway reboot would have been requested
 
 Only continue after the connectivity test and gateway login test both succeed.
 
-Edit `.env`:
+Edit the generated settings file:
 
 ```bash
-nano .env
+docker compose exec tmhi-watchdog \
+  sh -c "sed -i 's/^DRY_RUN=.*/DRY_RUN=false/' /data/watchdog.env"
 ```
 
-Change:
+The relevant value should now be:
 
 ```env
 DRY_RUN=false
 ```
 
-Recreate the container:
+Restart the container so the app reloads the generated file:
 
 ```bash
-docker compose up -d --force-recreate
+docker compose restart tmhi-watchdog
 ```
 
 Confirm the effective setting:
@@ -286,9 +253,6 @@ Perform the first real reboot test only while you are home and can recover the g
 After the package is publicly available, users can deploy the prebuilt image instead of building locally:
 
 ```bash
-cp .env.example .env
-nano .env
-
 docker compose -f deploy/docker-compose.ghcr.yml pull
 docker compose -f deploy/docker-compose.ghcr.yml up -d
 ```
@@ -303,7 +267,6 @@ docker compose -f deploy/docker-compose.ghcr.yml logs -f tmhi-watchdog
 
 | Variable | Default | Purpose |
 |---|---:|---|
-| `WEB_PORT` | `8088` | Dashboard/API port exposed on the Docker host |
 | `CHECK_INTERVAL_SECONDS` | `20` | Time between connectivity rounds |
 | `FAILURE_THRESHOLD_SECONDS` | `180` | Continuous outage required before reboot consideration |
 | `STARTUP_GRACE_SECONDS` | `60` | Prevents action immediately after container startup |
@@ -313,7 +276,7 @@ docker compose -f deploy/docker-compose.ghcr.yml logs -f tmhi-watchdog
 | `PROBE_TIMEOUT_SECONDS` | `5` | Timeout for each connectivity endpoint |
 | `MINIMUM_SUCCESSFUL_PROBES` | `2` | Successful probes required to consider internet online |
 
-See `.env.example` for all supported values.
+The app creates `/data/watchdog.env` with all supported settings. `.env.example` is an annotated reference for that generated file.
 
 ## API endpoints
 
@@ -327,13 +290,9 @@ See `.env.example` for all supported values.
 | `POST` | `/api/check` | Run one check without allowing a reboot |
 | `POST` | `/api/check/series` | Run repeated checks without allowing a reboot |
 | `POST` | `/api/gateway/test` | Test gateway reachability and login |
+| `POST` | `/api/gateway/login` | Authenticate and optionally save the gateway login |
+| `DELETE` | `/api/gateway/login` | Forget the saved gateway login |
 | `POST` | `/api/reboot` | Request a manual reboot |
-
-POST endpoints require:
-
-```text
-X-API-Token: value-from-API_TOKEN
-```
 
 ## Common commands
 
@@ -395,27 +354,14 @@ docker compose -f deploy/docker-compose.ghcr.yml up -d
 
 ## Troubleshooting
 
-### `.env: line 1: key cannot contain a space`
+### Reset generated settings
 
-Your `.env` file contains invalid content. Recreate it:
-
-```bash
-mv .env .env.bad
-cp .env.example .env
-nano .env
-```
-
-A valid file begins with:
-
-```env
-GATEWAY_HOST=192.168.12.1
-GATEWAY_PORT=8080
-```
-
-Inspect invisible characters with:
+If you want the app to recreate its managed settings file with defaults:
 
 ```bash
-sed -n '1,20l' .env
+docker compose exec tmhi-watchdog \
+  sh -c "mv /data/watchdog.env /data/watchdog.env.bad"
+docker compose restart tmhi-watchdog
 ```
 
 ### `sqlite3.OperationalError: unable to open database file`
@@ -454,34 +400,25 @@ Use the Docker server's LAN IP from other devices.
 
 ### Port 8088 is already used
 
-Change this in `.env`:
-
-```env
-WEB_PORT=8090
-```
-
-Then recreate:
+Set `WEB_PORT` when starting Compose, or edit the `ports` line in `docker-compose.yml`:
 
 ```bash
-docker compose up -d --force-recreate
+WEB_PORT=8090 docker compose up -d
 ```
 
 ### Gateway login fails
 
-Confirm:
-
-```env
-GATEWAY_HOST=192.168.12.1
-GATEWAY_PORT=8080
-GATEWAY_USERNAME=admin
-GATEWAY_PASSWORD=your-real-admin-password
-```
-
-Recreate after editing `.env`:
+Confirm the gateway address and user in the generated settings file:
 
 ```bash
-docker compose up -d --force-recreate
+docker compose exec tmhi-watchdog sed -n '1,20p' /data/watchdog.env
 ```
+
+If you saved the login from the dashboard, use Forget and then Log in again.
+Dashboard-saved credentials are stored as `GATEWAY_PASSWORD` in
+`/data/watchdog.env`.
+
+Restart after manually editing `/data/watchdog.env`.
 
 ### Docker cannot reach the gateway
 
@@ -508,6 +445,7 @@ Run the app without Docker:
 ```bash
 export PYTHONPATH=src
 export DATABASE_PATH=/tmp/tmhi-watchdog.db
+export WATCHDOG_ENV_PATH=/tmp/tmhi-watchdog.env
 export WATCHDOG_ENABLED=false
 uvicorn tmhi_watchdog.main:app --host 0.0.0.0 --port 8088
 ```
@@ -516,10 +454,9 @@ uvicorn tmhi_watchdog.main:app --host 0.0.0.0 --port 8088
 
 - Keep the dashboard on your trusted LAN.
 - Do not forward port `8088` directly to the internet.
-- Use a long random `API_TOKEN`.
-- Never publish `.env` or gateway credentials.
+- Never publish `/data/watchdog.env`, Docker secrets, or saved gateway credential files.
 - The local gateway API uses unencrypted HTTP, so use it only on a trusted network.
-- Passwords and tokens are not intentionally logged or stored in SQLite.
+- Passwords are not intentionally logged or stored in SQLite.
 
 ## Limitations
 

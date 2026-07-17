@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import secrets
 from contextlib import asynccontextmanager
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -74,24 +73,12 @@ if settings.cors_origins:
         allow_origins=list(settings.cors_origins),
         allow_credentials=False,
         allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type", "X-API-Token"],
+        allow_headers=["Content-Type"],
     )
 
 
 class RebootRequest(BaseModel):
     force: bool = False
-
-
-def require_api_token(
-    x_api_token: Annotated[str | None, Header(alias="X-API-Token")] = None,
-) -> None:
-    if not settings.api_token:
-        raise HTTPException(
-            status_code=503,
-            detail="Manual control API is disabled until API_TOKEN is configured",
-        )
-    if x_api_token is None or not secrets.compare_digest(x_api_token, settings.api_token):
-        raise HTTPException(status_code=401, detail="Invalid API token")
 
 
 @app.get("/healthz")
@@ -114,12 +101,12 @@ async def events(limit: int = Query(default=100, ge=1, le=500)) -> list[dict[str
     return await store.recent(limit)
 
 
-@app.post("/api/check", dependencies=[Depends(require_api_token)])
+@app.post("/api/check")
 async def check_now() -> dict[str, Any]:
     return await watchdog.check_once(allow_reboot=False)
 
 
-@app.post("/api/gateway/test", dependencies=[Depends(require_api_token)])
+@app.post("/api/gateway/test")
 async def gateway_test() -> dict[str, Any]:
     try:
         return await watchdog.test_gateway_login()
@@ -127,7 +114,7 @@ async def gateway_test() -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@app.post("/api/reboot", dependencies=[Depends(require_api_token)])
+@app.post("/api/reboot")
 async def reboot(request: RebootRequest) -> dict[str, Any]:
     try:
         return await watchdog.manual_reboot(force=request.force)

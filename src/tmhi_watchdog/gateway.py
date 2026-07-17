@@ -57,6 +57,9 @@ class UnifiedGatewayClient:
     async def close(self) -> None:
         await self._client.aclose()
 
+    def set_password(self, password: str) -> None:
+        self._password = password
+
     async def is_reachable(self) -> bool:
         """Mirror HINT Control's broad unified-gateway detection behavior."""
         try:

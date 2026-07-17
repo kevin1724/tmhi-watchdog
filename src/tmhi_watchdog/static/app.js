@@ -1,7 +1,7 @@
 const state = {
   config: null,
   status: null,
-  token: localStorage.getItem("tmhi-watchdog-token") || "",
+  gatewayLoginBusy: false,
   seriesRunning: false,
   seriesAbort: false,
 };
@@ -30,6 +30,8 @@ const configLabels = {
   gateway_port: "Gateway port",
   gateway_username: "Gateway user",
   gateway_password_configured: "Gateway password",
+  gateway_password_source: "Gateway login source",
+  gateway_login_saved: "Gateway login saved",
   watchdog_enabled: "Watchdog",
   dry_run: "Dry run",
   check_interval_seconds: "Check interval",
@@ -41,7 +43,7 @@ const configLabels = {
   probe_urls: "Probe URLs",
   minimum_successful_probes: "Required probes",
   database_path: "Database",
-  manual_api_enabled: "Manual API",
+  managed_env_path: "Settings file",
 };
 
 const els = {};
@@ -49,7 +51,6 @@ const els = {};
 document.addEventListener("DOMContentLoaded", () => {
   bindElements();
   bindEvents();
-  els.apiToken.value = state.token;
   updateControlState();
   loadInitialData();
   window.setInterval(refreshStatusAndEvents, 10000);
@@ -67,12 +68,12 @@ function bindElements() {
     "lastCheckValue",
     "rebootValue",
     "lastError",
-    "manualApiState",
-    "apiToken",
-    "saveTokenButton",
-    "clearTokenButton",
+    "gatewayLoginState",
     "gatewayPasswordRow",
     "gatewayPassword",
+    "saveGatewayLogin",
+    "saveGatewayLoginButton",
+    "clearGatewayLoginButton",
     "checkButton",
     "gatewayButton",
     "forceReboot",
@@ -99,14 +100,9 @@ function bindElements() {
 function bindEvents() {
   els.refreshButton.addEventListener("click", refreshStatusAndEvents);
   els.eventsButton.addEventListener("click", refreshEvents);
-  els.saveTokenButton.addEventListener("click", saveToken);
-  els.clearTokenButton.addEventListener("click", clearToken);
-  els.apiToken.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      saveToken();
-    }
-  });
+  els.gatewayPassword.addEventListener("input", updateControlState);
+  els.saveGatewayLoginButton.addEventListener("click", saveGatewayLogin);
+  els.clearGatewayLoginButton.addEventListener("click", clearGatewayLogin);
   els.checkButton.addEventListener("click", runSingleCheck);
   els.gatewayButton.addEventListener("click", runGatewayTest);
   els.rebootButton.addEventListener("click", requestReboot);
@@ -125,13 +121,6 @@ async function api(path, options = {}) {
   if (options.body !== undefined) {
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(options.body);
-  }
-
-  if (options.secure) {
-    if (!state.token) {
-      throw new Error("Enter and save an API token first.");
-    }
-    headers["X-API-Token"] = state.token;
   }
 
   const response = await fetch(path, {
@@ -203,33 +192,17 @@ async function refreshEvents() {
   }
 }
 
-function saveToken() {
-  state.token = els.apiToken.value.trim();
-  if (state.token) {
-    localStorage.setItem("tmhi-watchdog-token", state.token);
-    setActionMessage("Token saved.", "success");
-  } else {
-    localStorage.removeItem("tmhi-watchdog-token");
-    setActionMessage("Token cleared.", "success");
-  }
-  updateControlState();
-}
-
-function clearToken() {
-  state.token = "";
-  els.apiToken.value = "";
-  localStorage.removeItem("tmhi-watchdog-token");
-  setActionMessage("Token cleared.", "success");
-  updateControlState();
-}
-
 function updateControlState() {
-  const manualEnabled = state.config ? state.config.manual_api_enabled : true;
-  const tokenReady = Boolean(state.token);
-  const controlsDisabled = state.seriesRunning || !manualEnabled || !tokenReady;
+  const controlsDisabled = state.seriesRunning || state.gatewayLoginBusy;
+  const loginControlsDisabled = controlsDisabled;
   const gatewayPasswordConfigured = state.config
     ? Boolean(state.config.gateway_password_configured)
     : true;
+  const gatewayPasswordSource = state.config
+    ? state.config.gateway_password_source || "none"
+    : "unknown";
+  const canClearGatewayLogin =
+    gatewayPasswordSource === "saved" || gatewayPasswordSource === "runtime";
 
   [els.checkButton, els.gatewayButton, els.rebootButton, els.seriesStartButton].forEach(
     (button) => {
@@ -238,21 +211,24 @@ function updateControlState() {
   );
   els.forceReboot.disabled = controlsDisabled;
   els.seriesStopButton.disabled = !state.seriesRunning;
-  els.gatewayPasswordRow.classList.toggle(
-    "secret-row--hidden",
-    gatewayPasswordConfigured,
-  );
-  els.gatewayPassword.disabled = state.seriesRunning || gatewayPasswordConfigured;
-  if (gatewayPasswordConfigured) {
-    els.gatewayPassword.value = "";
-  }
+  els.gatewayPassword.disabled = loginControlsDisabled;
+  els.saveGatewayLogin.disabled = loginControlsDisabled;
+  els.saveGatewayLoginButton.disabled =
+    loginControlsDisabled || !els.gatewayPassword.value;
+  els.clearGatewayLoginButton.disabled = loginControlsDisabled || !canClearGatewayLogin;
 
-  if (!manualEnabled) {
-    setTag(els.manualApiState, "Disabled", "bad");
-  } else if (tokenReady) {
-    setTag(els.manualApiState, "Token saved", "good");
+  if (state.gatewayLoginBusy) {
+    setTag(els.gatewayLoginState, "Logging in", "warn");
+  } else if (!gatewayPasswordConfigured) {
+    setTag(els.gatewayLoginState, "Login needed", "warn");
+  } else if (gatewayPasswordSource === "environment") {
+    setTag(els.gatewayLoginState, "Env configured", "good");
+  } else if (gatewayPasswordSource === "saved") {
+    setTag(els.gatewayLoginState, "Saved", "good");
+  } else if (gatewayPasswordSource === "runtime") {
+    setTag(els.gatewayLoginState, "Session", "warn");
   } else {
-    setTag(els.manualApiState, "Token needed", "warn");
+    setTag(els.gatewayLoginState, "Configured", "good");
   }
 }
 
@@ -358,7 +334,7 @@ function renderEvents(events) {
 async function runSingleCheck() {
   try {
     setActionMessage("Running connectivity check.", "");
-    const status = await api("/api/check", { method: "POST", secure: true });
+    const status = await api("/api/check", { method: "POST" });
     state.status = status;
     renderStatus(status);
     await refreshEvents();
@@ -374,7 +350,7 @@ async function runGatewayTest() {
     : true;
   const gatewayPassword = els.gatewayPassword.value;
   if (!gatewayPasswordConfigured && !gatewayPassword) {
-    setActionMessage("Enter the gateway admin password first.", "error");
+    setActionMessage("Enter the gateway admin password or save the gateway login first.", "error");
     els.gatewayPassword.focus();
     return;
   }
@@ -383,15 +359,83 @@ async function runGatewayTest() {
     setActionMessage("Testing gateway.", "");
     const result = await api("/api/gateway/test", {
       method: "POST",
-      secure: true,
-      body: gatewayPasswordConfigured ? {} : { gateway_password: gatewayPassword },
+      body: gatewayPassword ? { gateway_password: gatewayPassword } : {},
     });
     const reachable = result.reachable ? "reachable" : "not reachable";
     const authenticated = result.authenticated ? "authenticated" : "not authenticated";
-    setActionMessage(`Gateway ${reachable}, ${authenticated}.`, "success");
+    const suffix = result.used_supplied_password ? " Password was tested but not saved." : "";
+    setActionMessage(`Gateway ${reachable}, ${authenticated}.${suffix}`, "success");
     await refreshStatusAndEvents();
   } catch (error) {
     setActionMessage(error.message, "error");
+  }
+}
+
+async function saveGatewayLogin() {
+  const gatewayPassword = els.gatewayPassword.value;
+  if (!gatewayPassword) {
+    setActionMessage("Enter the gateway admin password first.", "error");
+    els.gatewayPassword.focus();
+    return;
+  }
+
+  state.gatewayLoginBusy = true;
+  updateControlState();
+  try {
+    setActionMessage("Logging in to gateway.", "");
+    const result = await api("/api/gateway/login", {
+      method: "POST",
+      body: {
+        gateway_password: gatewayPassword,
+        remember: els.saveGatewayLogin.checked,
+      },
+    });
+    if (!result.reachable) {
+      setActionMessage("Gateway is not reachable. Login was not saved.", "error");
+      return;
+    }
+
+    els.gatewayPassword.value = "";
+    await loadConfig();
+    await refreshStatusAndEvents();
+    setActionMessage(
+      result.saved ? "Gateway login saved." : "Gateway login active for this session.",
+      "success",
+    );
+  } catch (error) {
+    setActionMessage(error.message, "error");
+  } finally {
+    state.gatewayLoginBusy = false;
+    updateControlState();
+  }
+}
+
+async function clearGatewayLogin() {
+  const confirmed = window.confirm("Forget the saved gateway login?");
+  if (!confirmed) {
+    return;
+  }
+
+  state.gatewayLoginBusy = true;
+  updateControlState();
+  try {
+    setActionMessage("Clearing gateway login.", "");
+    const result = await api("/api/gateway/login", {
+      method: "DELETE",
+    });
+    els.gatewayPassword.value = "";
+    await loadConfig();
+    await refreshStatusAndEvents();
+    if (result.gateway_password_source === "environment") {
+      setActionMessage("Saved gateway login cleared. Environment password remains active.", "success");
+    } else {
+      setActionMessage("Gateway login cleared.", "success");
+    }
+  } catch (error) {
+    setActionMessage(error.message, "error");
+  } finally {
+    state.gatewayLoginBusy = false;
+    updateControlState();
   }
 }
 
@@ -410,7 +454,6 @@ async function requestReboot() {
     setActionMessage("Requesting reboot.", "");
     const status = await api("/api/reboot", {
       method: "POST",
-      secure: true,
       body: { force },
     });
     state.status = status;
@@ -451,7 +494,7 @@ async function runSeries(event) {
         break;
       }
       setTag(els.seriesState, `${index} / ${settings.count}`, "warn");
-      const status = await api("/api/check", { method: "POST", secure: true });
+      const status = await api("/api/check", { method: "POST" });
       completed = index;
       state.status = status;
       renderStatus(status);
@@ -633,6 +676,9 @@ function formatConfigValue(value, key) {
   }
   if (key === "gateway_password_configured") {
     return value ? "Configured" : "Not configured";
+  }
+  if (key === "gateway_password_source") {
+    return humanize(value || "none");
   }
   if (typeof value === "boolean") {
     return value ? "On" : "Off";

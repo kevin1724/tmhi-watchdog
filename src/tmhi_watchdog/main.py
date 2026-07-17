@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +15,7 @@ from pydantic import BaseModel, Field
 from . import __version__
 from .config import Settings
 from .connectivity import ConnectivityChecker
+from .credentials import ManagedEnvFile
 from .gateway import UnifiedGatewayClient
 from .storage import EventStore
 from .watchdog import Watchdog
@@ -29,6 +29,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 store = EventStore(settings.database_path)
+managed_env = ManagedEnvFile(settings.managed_env_path)
 checker = ConnectivityChecker(
     settings.probe_urls,
     settings.probe_timeout_seconds,
@@ -77,8 +78,8 @@ if settings.cors_origins:
         CORSMiddleware,
         allow_origins=list(settings.cors_origins),
         allow_credentials=False,
-        allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type", "X-API-Token"],
+        allow_methods=["GET", "POST", "DELETE"],
+        allow_headers=["Content-Type"],
     )
 
 
@@ -95,16 +96,9 @@ class GatewayTestRequest(BaseModel):
     gateway_password: str = Field(default="", max_length=512, repr=False)
 
 
-def require_api_token(
-    x_api_token: Annotated[str | None, Header(alias="X-API-Token")] = None,
-) -> None:
-    if not settings.api_token:
-        raise HTTPException(
-            status_code=503,
-            detail="Manual control API is disabled until API_TOKEN is configured",
-        )
-    if x_api_token is None or not secrets.compare_digest(x_api_token, settings.api_token):
-        raise HTTPException(status_code=401, detail="Invalid API token")
+class GatewayLoginRequest(BaseModel):
+    gateway_password: str = Field(..., min_length=1, max_length=512, repr=False)
+    remember: bool = True
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -135,12 +129,12 @@ async def events(limit: int = Query(default=100, ge=1, le=500)) -> list[dict[str
     return await store.recent(limit)
 
 
-@app.post("/api/check", dependencies=[Depends(require_api_token)])
+@app.post("/api/check")
 async def check_now() -> dict[str, Any]:
     return await watchdog.check_once(allow_reboot=False)
 
 
-@app.post("/api/check/series", dependencies=[Depends(require_api_token)])
+@app.post("/api/check/series")
 async def check_series(request: CheckSeriesRequest) -> dict[str, Any]:
     return await watchdog.check_series(
         count=request.count,
@@ -148,7 +142,7 @@ async def check_series(request: CheckSeriesRequest) -> dict[str, Any]:
     )
 
 
-@app.post("/api/gateway/test", dependencies=[Depends(require_api_token)])
+@app.post("/api/gateway/test")
 async def gateway_test(request: GatewayTestRequest | None = None) -> dict[str, Any]:
     try:
         supplied_password = request.gateway_password if request else ""
@@ -181,7 +175,97 @@ async def gateway_test(request: GatewayTestRequest | None = None) -> dict[str, A
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@app.post("/api/reboot", dependencies=[Depends(require_api_token)])
+@app.post("/api/gateway/login")
+async def gateway_login(request: GatewayLoginRequest) -> dict[str, Any]:
+    test_gateway = UnifiedGatewayClient(
+        settings.gateway_base_url,
+        settings.gateway_username,
+        request.gateway_password,
+        settings.gateway_timeout_seconds,
+        settings.gateway_user_agent,
+    )
+    try:
+        reachable = await test_gateway.is_reachable()
+        if not reachable:
+            return {
+                "reachable": False,
+                "authenticated": False,
+                "saved": False,
+                "gateway_password_configured": bool(settings.gateway_password),
+                "gateway_password_source": settings.gateway_password_source,
+            }
+        await test_gateway.authenticate()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    finally:
+        await test_gateway.close()
+
+    if request.remember:
+        try:
+            managed_env.set_value("GATEWAY_PASSWORD", request.gateway_password)
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="Gateway login worked, but the password could not be saved",
+            ) from exc
+        password_source = "saved"
+    else:
+        password_source = "runtime"
+
+    settings.gateway_password = request.gateway_password
+    settings.gateway_password_source = password_source
+    gateway.set_password(request.gateway_password)
+    await store.record(
+        "gateway_login_saved" if request.remember else "gateway_login_authenticated",
+        (
+            "Gateway login saved from dashboard"
+            if request.remember
+            else "Gateway login authenticated from dashboard"
+        ),
+        {"username": settings.gateway_username, "remember": request.remember},
+    )
+    return {
+        "reachable": True,
+        "authenticated": True,
+        "saved": request.remember,
+        "gateway_password_configured": True,
+        "gateway_password_source": password_source,
+    }
+
+
+@app.delete("/api/gateway/login")
+async def gateway_login_clear() -> dict[str, Any]:
+    try:
+        saved_removed = managed_env.clear_value("GATEWAY_PASSWORD")
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Saved gateway login could not be cleared",
+        ) from exc
+    environment_password_active = settings.gateway_password_source == "environment"
+
+    if not environment_password_active:
+        settings.gateway_password = ""
+        settings.gateway_password_source = "none"
+        gateway.set_password("")
+
+    await store.record(
+        "gateway_login_cleared",
+        "Saved gateway login cleared from dashboard",
+        {
+            "saved_removed": saved_removed,
+            "environment_password_active": environment_password_active,
+        },
+    )
+    return {
+        "cleared": saved_removed or not environment_password_active,
+        "saved_removed": saved_removed,
+        "gateway_password_configured": bool(settings.gateway_password),
+        "gateway_password_source": settings.gateway_password_source,
+    }
+
+
+@app.post("/api/reboot")
 async def reboot(request: RebootRequest) -> dict[str, Any]:
     try:
         return await watchdog.manual_reboot(force=request.force)

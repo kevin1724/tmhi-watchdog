@@ -11,8 +11,7 @@ For a security-sensitive issue, contact the repository owner privately through t
 ## Deployment guidance
 
 - Keep the service on a trusted LAN.
-- Do not expose the API directly to the public internet.
-- Use a long, random `API_TOKEN`.
-- Keep gateway credentials in `.env` or Docker secrets and never commit them.
+- Do not expose the dashboard or API directly to the public internet.
+- Keep `/data/watchdog.env`, Docker secrets, and saved gateway credential files private.
 - Run one watchdog instance per gateway.
 - Test with `DRY_RUN=true` before enabling real reboots.

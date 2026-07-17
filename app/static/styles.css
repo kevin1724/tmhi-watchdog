@@ -272,14 +272,6 @@ input {
   color: #8e2929;
 }
 
-.token-row {
-  display: grid;
-  grid-template-columns: minmax(72px, auto) minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 14px;
-}
-
 .secret-row {
   display: grid;
   grid-template-columns: minmax(172px, auto) minmax(0, 1fr);
@@ -288,8 +280,25 @@ input {
   margin-bottom: 14px;
 }
 
-.secret-row--hidden {
-  display: none;
+.login-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 4px 0 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  color: #344139;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.gateway-login-actions {
+  display: grid;
+  grid-template-columns: minmax(104px, auto) 1fr 1fr;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
 }
 
 label {
@@ -503,8 +512,8 @@ td {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .token-row,
   .secret-row,
+  .gateway-login-actions,
   .control-grid,
   .series-form,
   .progress-line {

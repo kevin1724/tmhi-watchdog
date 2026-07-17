@@ -58,33 +58,34 @@
       <section class="panel" aria-labelledby="controlsHeading">
         <div class="panel__header">
           <h2 id="controlsHeading">Controls</h2>
-          <span id="manualApiState" class="tag">Checking</span>
         </div>
 
-        <div class="token-row">
-          <label for="apiToken">API token</label>
-          <input
-            id="apiToken"
-            type="password"
-            autocomplete="off"
-            placeholder="X-API-Token"
-          />
-          <button id="saveTokenButton" class="button button--secondary" type="button">
-            Save
-          </button>
-          <button id="clearTokenButton" class="button button--ghost" type="button">
-            Clear
-          </button>
+        <div class="login-status">
+          <span>Gateway login</span>
+          <span id="gatewayLoginState" class="tag">Checking</span>
         </div>
 
-        <div id="gatewayPasswordRow" class="secret-row secret-row--hidden">
+        <div id="gatewayPasswordRow" class="secret-row">
           <label for="gatewayPassword">Gateway admin password</label>
           <input
             id="gatewayPassword"
             type="password"
             autocomplete="current-password"
-            placeholder="Admin password"
+            placeholder="Enter to save or test"
           />
+        </div>
+
+        <div class="gateway-login-actions">
+          <label class="checkbox-line" for="saveGatewayLogin">
+            <input id="saveGatewayLogin" type="checkbox" checked />
+            Remember
+          </label>
+          <button id="saveGatewayLoginButton" class="button button--primary" type="button">
+            Log in
+          </button>
+          <button id="clearGatewayLoginButton" class="button button--ghost" type="button">
+            Forget
+          </button>
         </div>
 
         <div class="control-grid">
