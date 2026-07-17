@@ -14,6 +14,7 @@ This targets the failure where phones and computers remain connected to Wi-Fi or
 - Multiple independent HTTP/HTTPS connectivity checks
 - Sustained-outage confirmation before any reboot
 - Local gateway reachability and authentication testing
+- Gateway API/model auto-detection for supported local gateways
 - Automatic and manual reboot requests
 - Startup grace, post-reboot grace, cooldown, and daily reboot limits
 - Persistent SQLite event history
@@ -286,7 +287,7 @@ The app creates `/data/watchdog.env` with all supported settings. `.env.example`
 | `GET` | `/healthz` | Process health |
 | `GET` | `/api/status` | Current watchdog state and probe results |
 | `GET` | `/api/config` | Non-secret effective configuration |
-| `GET` | `/api/events?limit=100` | Persistent event history |
+| `GET` | `/api/events?limit=10` | Recent event history |
 | `POST` | `/api/check` | Run one check without allowing a reboot |
 | `POST` | `/api/check/series` | Run repeated checks without allowing a reboot |
 | `POST` | `/api/gateway/test` | Test gateway reachability and login |

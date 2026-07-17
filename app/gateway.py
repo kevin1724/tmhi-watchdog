@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
-from .models import RebootResult
+from .models import GatewayDetection, RebootResult
 
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,8 @@ class UnifiedGatewayClient:
     AUTH_PATH = "/auth/login"
     INFO_PATH = "/gateway/?get=all"
     REBOOT_PATH = "/gateway/reset?set=reboot"
+    NOKIA_STATUS_PATH = "/dashboard_device_status_web_app.cgi"
+    NOKIA_INFO_PATH = "/dashboard_device_info_status_web_app.cgi"
 
     def __init__(
         self,
@@ -60,13 +63,104 @@ class UnifiedGatewayClient:
     def set_password(self, password: str) -> None:
         self._password = password
 
+    async def detect(self) -> GatewayDetection:
+        unified = await self._detect_unified()
+        if unified.reachable:
+            return unified
+
+        nokia = await self._detect_nokia()
+        if nokia.reachable:
+            return nokia
+
+        return GatewayDetection(
+            reachable=False,
+            error=unified.error or nokia.error or "Gateway was not detected",
+        )
+
     async def is_reachable(self) -> bool:
         """Mirror HINT Control's broad unified-gateway detection behavior."""
+        detection = await self._detect_unified()
+        return detection.reachable
+
+    async def _detect_unified(self) -> GatewayDetection:
         try:
             response = await self._client.get(self.INFO_PATH)
-            return response.status_code not in {403, 404}
+        except (httpx.HTTPError, OSError) as exc:
+            return GatewayDetection(
+                reachable=False,
+                api_type="unified",
+                supported=True,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+
+        if response.status_code in {403, 404}:
+            return GatewayDetection(
+                reachable=False,
+                api_type="unified",
+                supported=True,
+                error=f"Unified API returned HTTP {response.status_code}",
+            )
+
+        device = _extract_mapping(response, "device")
+        return GatewayDetection(
+            reachable=True,
+            api_type="unified",
+            supported=True,
+            model=_string_or_none(device.get("model")),
+            manufacturer=_string_or_none(device.get("manufacturer")),
+            name=_string_or_none(device.get("friendlyName") or device.get("name")),
+            error=None if response.is_success else f"Unified API returned HTTP {response.status_code}",
+        )
+
+    async def _detect_nokia(self) -> GatewayDetection:
+        try:
+            response = await self._client.get(self._gateway_root_url() + self.NOKIA_STATUS_PATH)
+        except (httpx.HTTPError, OSError) as exc:
+            return GatewayDetection(
+                reachable=False,
+                api_type="nokia",
+                supported=False,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+
+        if not response.is_success:
+            return GatewayDetection(
+                reachable=False,
+                api_type="nokia",
+                supported=False,
+                error=f"Nokia API returned HTTP {response.status_code}",
+            )
+
+        model = "Nokia 5G21"
+        manufacturer = "Nokia"
+        name = None
+        try:
+            info_response = await self._client.get(self._gateway_root_url() + self.NOKIA_INFO_PATH)
+            app_status = _extract_first_mapping(info_response, "device_app_status")
+            model = _string_or_none(app_status.get("ProductClass")) or model
+            manufacturer = _string_or_none(app_status.get("ManufacturerOUI")) or manufacturer
+            name = _string_or_none(app_status.get("Description"))
         except (httpx.HTTPError, OSError):
-            return False
+            pass
+
+        return GatewayDetection(
+            reachable=True,
+            api_type="nokia",
+            supported=False,
+            model=model,
+            manufacturer=manufacturer,
+            name=name,
+            error="Nokia gateway detected; reboot support is not implemented",
+        )
+
+    def _gateway_root_url(self) -> str:
+        parsed = urlparse(self.base_url)
+        if not parsed.scheme or not parsed.hostname:
+            return self.base_url.split("/TMI/v1", 1)[0].rstrip("/")
+        host = parsed.hostname
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        return f"{parsed.scheme}://{host}"
 
     async def authenticate(self) -> str:
         if not self._password:
@@ -135,3 +229,35 @@ class UnifiedGatewayClient:
             raise GatewayUnavailableError(
                 f"Could not connect to the gateway reboot API: {type(exc).__name__}"
             ) from exc
+
+
+def _extract_mapping(response: httpx.Response, key: str) -> dict[str, Any]:
+    if not response.is_success:
+        return {}
+    try:
+        payload = response.json()
+    except ValueError:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    value = payload.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _extract_first_mapping(response: httpx.Response, key: str) -> dict[str, Any]:
+    if not response.is_success:
+        return {}
+    try:
+        payload = response.json()
+    except ValueError:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    value = payload.get(key)
+    if isinstance(value, list) and value and isinstance(value[0], dict):
+        return value[0]
+    return {}
+
+
+def _string_or_none(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None

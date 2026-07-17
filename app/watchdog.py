@@ -7,7 +7,13 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
 from .config import Settings
-from .models import ConnectivityResult, RebootResult, RuntimeState, utc_now
+from .models import (
+    ConnectivityResult,
+    GatewayDetection,
+    RebootResult,
+    RuntimeState,
+    utc_now,
+)
 from .storage import EventStore
 
 
@@ -19,6 +25,7 @@ class ConnectivityCheckerProtocol(Protocol):
 
 
 class GatewayProtocol(Protocol):
+    async def detect(self) -> GatewayDetection: ...
     async def is_reachable(self) -> bool: ...
     async def authenticate(self) -> str: ...
     async def reboot(self) -> RebootResult: ...
@@ -114,8 +121,15 @@ class Watchdog:
 
     async def check_once(self, *, allow_reboot: bool) -> dict[str, Any]:
         async with self._cycle_lock:
-            result = await self.checker.check()
-            await self._apply_connectivity_result(result, allow_reboot=allow_reboot)
+            result, gateway_detection = await asyncio.gather(
+                self.checker.check(),
+                self.gateway.detect(),
+            )
+            await self._apply_connectivity_result(
+                result,
+                gateway_detection,
+                allow_reboot=allow_reboot,
+            )
             return await self.status_snapshot()
 
     async def check_series(
@@ -144,7 +158,11 @@ class Watchdog:
         }
 
     async def _apply_connectivity_result(
-        self, result: ConnectivityResult, *, allow_reboot: bool
+        self,
+        result: ConnectivityResult,
+        gateway_detection: GatewayDetection,
+        *,
+        allow_reboot: bool,
     ) -> None:
         now = result.checked_at
         async with self._state_lock:
@@ -154,6 +172,7 @@ class Watchdog:
             self.state.successful_probes = result.successful_probes
             self.state.total_probes = len(result.probes)
             self.state.last_probe_results = [asdict(item) for item in result.probes]
+            self._apply_gateway_detection(gateway_detection)
             self.state.last_error = None
 
         if result.online:
@@ -161,7 +180,6 @@ class Watchdog:
                 self.state.phase = "online"
                 self.state.last_online_at = now
                 self.state.failure_started_at = None
-                self.state.gateway_reachable = None
                 self.state.post_reboot_grace_until = (
                     None
                     if self.state.post_reboot_grace_until
@@ -262,6 +280,15 @@ class Watchdog:
             return
 
         await self._perform_reboot(now, source="automatic", force=False)
+
+    def _apply_gateway_detection(self, detection: GatewayDetection) -> None:
+        self.state.gateway_reachable = detection.reachable
+        self.state.gateway_api_type = detection.api_type
+        self.state.gateway_supported = detection.supported
+        self.state.gateway_model = detection.model
+        self.state.gateway_manufacturer = detection.manufacturer
+        self.state.gateway_name = detection.name
+        self.state.gateway_error = detection.error
 
     async def manual_reboot(self, *, force: bool = False) -> dict[str, Any]:
         async with self._cycle_lock:

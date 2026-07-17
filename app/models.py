@@ -48,6 +48,28 @@ class RebootResult:
 
 
 @dataclass(slots=True)
+class GatewayDetection:
+    reachable: bool
+    api_type: str | None = None
+    supported: bool = False
+    model: str | None = None
+    manufacturer: str | None = None
+    name: str | None = None
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "reachable": self.reachable,
+            "api_type": self.api_type,
+            "supported": self.supported,
+            "model": self.model,
+            "manufacturer": self.manufacturer,
+            "name": self.name,
+            "error": self.error,
+        }
+
+
+@dataclass(slots=True)
 class RuntimeState:
     phase: str = "initializing"
     service_started_at: datetime = field(default_factory=utc_now)
@@ -63,6 +85,12 @@ class RuntimeState:
     post_reboot_grace_until: datetime | None = None
     cooldown_until: datetime | None = None
     gateway_reachable: bool | None = None
+    gateway_api_type: str | None = None
+    gateway_supported: bool | None = None
+    gateway_model: str | None = None
+    gateway_manufacturer: str | None = None
+    gateway_name: str | None = None
+    gateway_error: str | None = None
     reboot_count_24h: int = 0
     last_error: str | None = None
 
@@ -87,6 +115,12 @@ class RuntimeState:
             "post_reboot_grace_until": iso_or_none(self.post_reboot_grace_until),
             "cooldown_until": iso_or_none(self.cooldown_until),
             "gateway_reachable": self.gateway_reachable,
+            "gateway_api_type": self.gateway_api_type,
+            "gateway_supported": self.gateway_supported,
+            "gateway_model": self.gateway_model,
+            "gateway_manufacturer": self.gateway_manufacturer,
+            "gateway_name": self.gateway_name,
+            "gateway_error": self.gateway_error,
             "reboot_count_24h": self.reboot_count_24h,
             "last_error": self.last_error,
             "dry_run": dry_run,

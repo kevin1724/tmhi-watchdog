@@ -3,7 +3,13 @@ from datetime import timedelta
 import pytest
 
 from tmhi_watchdog.config import Settings
-from tmhi_watchdog.models import ConnectivityResult, ProbeResult, RebootResult, utc_now
+from tmhi_watchdog.models import (
+    ConnectivityResult,
+    GatewayDetection,
+    ProbeResult,
+    RebootResult,
+    utc_now,
+)
 from tmhi_watchdog.storage import EventStore
 from tmhi_watchdog.watchdog import Watchdog
 
@@ -29,6 +35,15 @@ class FakeGateway:
     def __init__(self) -> None:
         self.reboot_calls = 0
         self.reachable = True
+        self.model = "TMOG4AR"
+
+    async def detect(self) -> GatewayDetection:
+        return GatewayDetection(
+            reachable=self.reachable,
+            api_type="unified" if self.reachable else None,
+            supported=self.reachable,
+            model=self.model if self.reachable else None,
+        )
 
     async def is_reachable(self) -> bool:
         return self.reachable
@@ -116,3 +131,24 @@ async def test_check_series_runs_requested_checks_without_reboot(tmp_path) -> No
     assert checker.calls == 3
     assert gateway.reboot_calls == 0
     assert result["results"][-1]["status"]["phase"] == "outage_confirmed"
+
+
+@pytest.mark.asyncio
+async def test_gateway_detection_updates_status_on_online_check(tmp_path) -> None:
+    settings = Settings(
+        watchdog_enabled=False,
+        database_path=str(tmp_path / "watchdog.db"),
+    )
+    store = EventStore(settings.database_path)
+    await store.initialize()
+    checker = FakeChecker(True)
+    gateway = FakeGateway()
+    watchdog = Watchdog(settings, checker, gateway, store)
+    await watchdog.initialize()
+
+    status = await watchdog.check_once(allow_reboot=False)
+
+    assert status["internet_online"] is True
+    assert status["gateway_reachable"] is True
+    assert status["gateway_supported"] is True
+    assert status["gateway_model"] == "TMOG4AR"

@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
+MAX_RECENT_EVENTS = 10
+
+
 class EventStore:
     def __init__(self, path: str) -> None:
         self.path = path
@@ -65,8 +68,8 @@ class EventStore:
         async with self._lock:
             await asyncio.to_thread(_record)
 
-    async def recent(self, limit: int = 100) -> list[dict[str, Any]]:
-        safe_limit = max(1, min(limit, 500))
+    async def recent(self, limit: int = MAX_RECENT_EVENTS) -> list[dict[str, Any]]:
+        safe_limit = max(1, min(limit, MAX_RECENT_EVENTS))
 
         def _recent() -> list[dict[str, Any]]:
             with self._connect() as connection:

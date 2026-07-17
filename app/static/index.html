@@ -13,6 +13,9 @@
         <h1>Watchdog Console</h1>
       </div>
       <div class="topbar__status">
+        <button id="tutorialButton" class="button button--secondary button--compact" type="button">
+          Help
+        </button>
         <span id="phasePill" class="phase-pill phase-pill--unknown">Initializing</span>
         <span id="updatedAt" class="muted">Not refreshed</span>
       </div>
@@ -58,6 +61,24 @@
       <section class="panel" aria-labelledby="controlsHeading">
         <div class="panel__header">
           <h2 id="controlsHeading">Controls</h2>
+          <span id="settingsState" class="tag">Checking</span>
+        </div>
+
+        <div class="settings-grid" aria-label="Watchdog settings">
+          <label class="switch-line" for="dryRunToggle">
+            <span>
+              Dry run
+              <small id="dryRunHint">Test only</small>
+            </span>
+            <input id="dryRunToggle" type="checkbox" checked />
+          </label>
+          <label for="testsPerHour">
+            Tests per hour
+            <input id="testsPerHour" type="number" min="1" max="720" step="1" value="180" />
+          </label>
+          <button id="saveSettingsButton" class="button button--secondary" type="button">
+            Save settings
+          </button>
         </div>
 
         <div class="login-status">
@@ -216,6 +237,26 @@
         </div>
       </section>
     </main>
+
+    <div id="tutorialModal" class="modal modal--hidden" role="dialog" aria-modal="true" aria-labelledby="tutorialHeading">
+      <div class="modal__panel">
+        <div class="modal__header">
+          <h2 id="tutorialHeading">Quick start</h2>
+          <button id="tutorialCloseButton" class="button button--ghost" type="button">
+            Close
+          </button>
+        </div>
+        <ol class="tutorial-list">
+          <li>Save the gateway admin password with Remember checked.</li>
+          <li>Click Test gateway and Run check to confirm the Docker host can reach everything.</li>
+          <li>Leave Dry run on while testing; reboot requests are logged but not sent.</li>
+          <li>When both tests pass, turn Dry run off and save settings.</li>
+        </ol>
+        <button id="tutorialDoneButton" class="button button--primary" type="button">
+          Got it
+        </button>
+      </div>
+    </div>
 
     <script src="/static/app.js" defer></script>
   </body>

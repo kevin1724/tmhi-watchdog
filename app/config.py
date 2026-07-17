@@ -242,6 +242,7 @@ class Settings:
             "watchdog_enabled": self.watchdog_enabled,
             "dry_run": self.dry_run,
             "check_interval_seconds": self.check_interval_seconds,
+            "tests_per_hour": round(3600 / self.check_interval_seconds),
             "failure_threshold_seconds": self.failure_threshold_seconds,
             "startup_grace_seconds": self.startup_grace_seconds,
             "post_reboot_grace_seconds": self.post_reboot_grace_seconds,

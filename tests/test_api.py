@@ -159,3 +159,51 @@ def test_gateway_login_clear_removes_saved_password(monkeypatch, tmp_path) -> No
     assert "GATEWAY_PASSWORD=\n" in env_path.read_text(encoding="utf-8")
     assert main.settings.gateway_password == ""
     assert main.gateway._password == ""
+
+
+def test_settings_update_saves_dry_run_and_frequency(monkeypatch, tmp_path) -> None:
+    main = load_main(monkeypatch, tmp_path)
+    env_path = tmp_path / "watchdog.env"
+    main.settings.gateway_password = "saved-password"
+
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/settings",
+            json={"dry_run": False, "tests_per_hour": 120},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["dry_run"] is False
+    assert payload["tests_per_hour"] == 120
+    assert payload["check_interval_seconds"] == 30
+    assert main.settings.dry_run is False
+    assert main.settings.check_interval_seconds == 30
+    saved_settings = env_path.read_text(encoding="utf-8")
+    assert "DRY_RUN=false\n" in saved_settings
+    assert "CHECK_INTERVAL_SECONDS=30\n" in saved_settings
+
+
+def test_settings_update_requires_password_before_live_reboots(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    main = load_main(monkeypatch, tmp_path)
+
+    with TestClient(main.app) as client:
+        response = client.post("/api/settings", json={"dry_run": False})
+
+    assert response.status_code == 409
+    assert main.settings.dry_run is True
+
+
+def test_events_endpoint_returns_at_most_ten_events(monkeypatch, tmp_path) -> None:
+    main = load_main(monkeypatch, tmp_path)
+
+    with TestClient(main.app) as client:
+        for index in range(12):
+            client.post("/api/settings", json={"dry_run": True, "tests_per_hour": index + 1})
+        response = client.get("/api/events?limit=500")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 10

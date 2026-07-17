@@ -101,6 +101,15 @@ class GatewayLoginRequest(BaseModel):
     remember: bool = True
 
 
+class SettingsUpdateRequest(BaseModel):
+    dry_run: bool | None = None
+    tests_per_hour: int | None = Field(default=None, ge=1, le=720)
+
+
+def _tests_per_hour_to_interval_seconds(tests_per_hour: int) -> int:
+    return max(5, round(3600 / tests_per_hour))
+
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -124,8 +133,51 @@ async def config() -> dict[str, Any]:
     return settings.safe_summary()
 
 
+@app.post("/api/settings")
+async def update_settings(request: SettingsUpdateRequest) -> dict[str, Any]:
+    updated: dict[str, Any] = {}
+
+    if request.dry_run is not None:
+        if request.dry_run is False and not settings.gateway_password:
+            raise HTTPException(
+                status_code=409,
+                detail="Save the gateway admin password before turning Dry Run off",
+            )
+        try:
+            managed_env.set_value("DRY_RUN", str(request.dry_run).lower())
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="Dry Run could not be saved",
+            ) from exc
+        settings.dry_run = request.dry_run
+        updated["dry_run"] = request.dry_run
+
+    if request.tests_per_hour is not None:
+        interval_seconds = _tests_per_hour_to_interval_seconds(request.tests_per_hour)
+        try:
+            managed_env.set_value("CHECK_INTERVAL_SECONDS", str(interval_seconds))
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="Test frequency could not be saved",
+            ) from exc
+        settings.check_interval_seconds = interval_seconds
+        updated["tests_per_hour"] = request.tests_per_hour
+        updated["check_interval_seconds"] = interval_seconds
+
+    if updated:
+        await store.record(
+            "settings_updated",
+            "Dashboard settings updated",
+            updated,
+        )
+
+    return settings.safe_summary()
+
+
 @app.get("/api/events")
-async def events(limit: int = Query(default=100, ge=1, le=500)) -> list[dict[str, Any]]:
+async def events(limit: int = Query(default=10, ge=1, le=500)) -> list[dict[str, Any]]:
     return await store.recent(limit)
 
 

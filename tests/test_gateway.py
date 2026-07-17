@@ -49,3 +49,75 @@ async def test_missing_token_is_auth_error() -> None:
             await client.authenticate()
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_detect_unified_gateway_model() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/TMI/v1/gateway/")
+        return httpx.Response(
+            200,
+            json={
+                "device": {
+                    "manufacturer": "Arcadyan",
+                    "model": "TMOG4AR",
+                    "friendlyName": "T-Mobile Gateway",
+                }
+            },
+        )
+
+    client = UnifiedGatewayClient(
+        "http://192.168.12.1:8080/TMI/v1",
+        "admin",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        detection = await client.detect()
+    finally:
+        await client.close()
+
+    assert detection.reachable is True
+    assert detection.supported is True
+    assert detection.api_type == "unified"
+    assert detection.model == "TMOG4AR"
+    assert detection.manufacturer == "Arcadyan"
+
+
+@pytest.mark.asyncio
+async def test_detect_nokia_gateway_as_unsupported() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/TMI/v1/gateway/"):
+            return httpx.Response(404)
+        if request.url.path.endswith("/dashboard_device_status_web_app.cgi"):
+            return httpx.Response(200, json={"num_extenders": 0})
+        if request.url.path.endswith("/dashboard_device_info_status_web_app.cgi"):
+            return httpx.Response(
+                200,
+                json={
+                    "device_app_status": [
+                        {
+                            "ManufacturerOUI": "Nokia",
+                            "ProductClass": "5G21",
+                            "Description": "Nokia FastMile",
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(500)
+
+    client = UnifiedGatewayClient(
+        "http://192.168.12.1:8080/TMI/v1",
+        "admin",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        detection = await client.detect()
+    finally:
+        await client.close()
+
+    assert detection.reachable is True
+    assert detection.supported is False
+    assert detection.api_type == "nokia"
+    assert detection.model == "5G21"

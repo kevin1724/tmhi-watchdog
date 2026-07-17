@@ -2,9 +2,12 @@ const state = {
   config: null,
   status: null,
   gatewayLoginBusy: false,
+  settingsBusy: false,
   seriesRunning: false,
   seriesAbort: false,
 };
+
+const TUTORIAL_STORAGE_KEY = "tmhi-watchdog-tutorial-seen";
 
 const phaseGroups = {
   good: new Set(["online"]),
@@ -35,6 +38,7 @@ const configLabels = {
   watchdog_enabled: "Watchdog",
   dry_run: "Dry run",
   check_interval_seconds: "Check interval",
+  tests_per_hour: "Tests per hour",
   failure_threshold_seconds: "Failure threshold",
   startup_grace_seconds: "Startup grace",
   post_reboot_grace_seconds: "Post-reboot grace",
@@ -52,12 +56,16 @@ document.addEventListener("DOMContentLoaded", () => {
   bindElements();
   bindEvents();
   updateControlState();
-  loadInitialData();
+  loadInitialData().finally(maybeShowTutorial);
   window.setInterval(refreshStatusAndEvents, 10000);
 });
 
 function bindElements() {
   [
+    "tutorialButton",
+    "tutorialModal",
+    "tutorialCloseButton",
+    "tutorialDoneButton",
     "phasePill",
     "updatedAt",
     "refreshButton",
@@ -68,6 +76,11 @@ function bindElements() {
     "lastCheckValue",
     "rebootValue",
     "lastError",
+    "settingsState",
+    "dryRunToggle",
+    "dryRunHint",
+    "testsPerHour",
+    "saveSettingsButton",
     "gatewayLoginState",
     "gatewayPasswordRow",
     "gatewayPassword",
@@ -98,8 +111,23 @@ function bindElements() {
 }
 
 function bindEvents() {
+  els.tutorialButton.addEventListener("click", openTutorial);
+  els.tutorialCloseButton.addEventListener("click", closeTutorial);
+  els.tutorialDoneButton.addEventListener("click", closeTutorial);
+  els.tutorialModal.addEventListener("click", (event) => {
+    if (event.target === els.tutorialModal) {
+      closeTutorial();
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !els.tutorialModal.classList.contains("modal--hidden")) {
+      closeTutorial();
+    }
+  });
   els.refreshButton.addEventListener("click", refreshStatusAndEvents);
   els.eventsButton.addEventListener("click", refreshEvents);
+  els.saveSettingsButton.addEventListener("click", saveSettings);
+  els.dryRunToggle.addEventListener("change", updateDryRunHint);
   els.gatewayPassword.addEventListener("input", updateControlState);
   els.saveGatewayLoginButton.addEventListener("click", saveGatewayLogin);
   els.clearGatewayLoginButton.addEventListener("click", clearGatewayLogin);
@@ -163,6 +191,7 @@ async function loadConfig() {
   try {
     state.config = await api("/api/config");
     renderConfig(state.config);
+    renderSettingsControls(state.config);
     updateControlState();
   } catch (error) {
     setActionMessage(error.message, "error");
@@ -185,15 +214,79 @@ async function refreshStatus() {
 
 async function refreshEvents() {
   try {
-    const events = await api("/api/events?limit=75");
+    const events = await api("/api/events?limit=10");
     renderEvents(events);
   } catch (error) {
     setActionMessage(error.message, "error");
   }
 }
 
+async function saveSettings() {
+  let testsPerHour;
+  try {
+    testsPerHour = readTestsPerHour();
+  } catch (error) {
+    setActionMessage(error.message, "error");
+    els.testsPerHour.focus();
+    return;
+  }
+
+  const dryRun = els.dryRunToggle.checked;
+  const turningLive = state.config && state.config.dry_run && !dryRun;
+  if (turningLive && !state.config.gateway_password_configured) {
+    setActionMessage("Save the gateway admin password before turning Dry Run off.", "error");
+    els.gatewayPassword.focus();
+    return;
+  }
+  if (turningLive) {
+    const confirmed = window.confirm("Turn Dry Run off and allow real gateway reboots?");
+    if (!confirmed) {
+      els.dryRunToggle.checked = true;
+      updateDryRunHint();
+      return;
+    }
+  }
+
+  state.settingsBusy = true;
+  updateControlState();
+  try {
+    const config = await api("/api/settings", {
+      method: "POST",
+      body: {
+        dry_run: dryRun,
+        tests_per_hour: testsPerHour,
+      },
+    });
+    state.config = config;
+    renderConfig(config);
+    renderSettingsControls(config);
+    await refreshStatusAndEvents();
+    setActionMessage("Settings saved.", "success");
+  } catch (error) {
+    setActionMessage(error.message, "error");
+    await loadConfig();
+  } finally {
+    state.settingsBusy = false;
+    updateControlState();
+  }
+}
+
+function readTestsPerHour() {
+  const testsPerHour = Number.parseInt(els.testsPerHour.value, 10);
+  if (!Number.isInteger(testsPerHour) || testsPerHour < 1 || testsPerHour > 720) {
+    throw new Error("Tests per hour must be between 1 and 720.");
+  }
+  return testsPerHour;
+}
+
+function intervalToTestsPerHour(intervalSeconds) {
+  const safeInterval = Number(intervalSeconds) || 20;
+  return Math.max(1, Math.min(720, Math.round(3600 / safeInterval)));
+}
+
 function updateControlState() {
-  const controlsDisabled = state.seriesRunning || state.gatewayLoginBusy;
+  const controlsDisabled =
+    state.seriesRunning || state.gatewayLoginBusy || state.settingsBusy;
   const loginControlsDisabled = controlsDisabled;
   const gatewayPasswordConfigured = state.config
     ? Boolean(state.config.gateway_password_configured)
@@ -211,11 +304,24 @@ function updateControlState() {
   );
   els.forceReboot.disabled = controlsDisabled;
   els.seriesStopButton.disabled = !state.seriesRunning;
+  els.dryRunToggle.disabled = controlsDisabled || !state.config;
+  els.testsPerHour.disabled = controlsDisabled || !state.config;
+  els.saveSettingsButton.disabled = controlsDisabled || !state.config;
   els.gatewayPassword.disabled = loginControlsDisabled;
   els.saveGatewayLogin.disabled = loginControlsDisabled;
   els.saveGatewayLoginButton.disabled =
     loginControlsDisabled || !els.gatewayPassword.value;
   els.clearGatewayLoginButton.disabled = loginControlsDisabled || !canClearGatewayLogin;
+
+  if (state.settingsBusy) {
+    setTag(els.settingsState, "Saving", "warn");
+  } else if (state.config && state.config.dry_run) {
+    setTag(els.settingsState, "Safe mode", "warn");
+  } else if (state.config) {
+    setTag(els.settingsState, "Live reboots", "good");
+  } else {
+    setTag(els.settingsState, "Checking", "");
+  }
 
   if (state.gatewayLoginBusy) {
     setTag(els.gatewayLoginState, "Logging in", "warn");
@@ -232,6 +338,33 @@ function updateControlState() {
   }
 }
 
+function renderSettingsControls(config) {
+  els.dryRunToggle.checked = Boolean(config.dry_run);
+  els.testsPerHour.value = String(config.tests_per_hour || intervalToTestsPerHour(config.check_interval_seconds));
+  updateDryRunHint();
+}
+
+function updateDryRunHint() {
+  els.dryRunHint.textContent = els.dryRunToggle.checked ? "Test only" : "Can reboot";
+}
+
+function maybeShowTutorial() {
+  const tutorialRequested = new URLSearchParams(window.location.search).get("tutorial") === "1";
+  if (tutorialRequested || !localStorage.getItem(TUTORIAL_STORAGE_KEY)) {
+    openTutorial();
+  }
+}
+
+function openTutorial() {
+  els.tutorialModal.classList.remove("modal--hidden");
+  els.tutorialDoneButton.focus();
+}
+
+function closeTutorial() {
+  localStorage.setItem(TUTORIAL_STORAGE_KEY, "true");
+  els.tutorialModal.classList.add("modal--hidden");
+}
+
 function renderStatus(status) {
   renderPhase(status.phase);
   setStatusText(
@@ -244,13 +377,7 @@ function renderStatus(status) {
   els.probeValue.textContent = `${status.successful_probes || 0} / ${
     status.total_probes || 0
   }`;
-  setStatusText(
-    els.gatewayValue,
-    status.gateway_reachable,
-    "Reachable",
-    "Unreachable",
-    "Unknown",
-  );
+  renderGatewayStatus(status);
   setStatusText(els.dryRunValue, status.dry_run, "On", "Off", "Unknown");
   els.lastCheckValue.textContent = formatDate(status.last_check_at);
   els.rebootValue.textContent = String(status.reboot_count_24h || 0);
@@ -279,6 +406,24 @@ function renderPhase(phase) {
   }
   els.phasePill.className = className;
   els.phasePill.textContent = humanize(value);
+}
+
+function renderGatewayStatus(status) {
+  els.gatewayValue.className = "";
+  if (status.gateway_reachable === true) {
+    const label = status.gateway_model || status.gateway_name || "Reachable";
+    els.gatewayValue.textContent =
+      status.gateway_supported === false ? `${label} (unsupported)` : label;
+    els.gatewayValue.classList.add(
+      status.gateway_supported === false ? "status-warn" : "status-good",
+    );
+  } else if (status.gateway_reachable === false) {
+    els.gatewayValue.textContent = "Not found";
+    els.gatewayValue.classList.add("status-bad");
+  } else {
+    els.gatewayValue.textContent = "Detecting";
+    els.gatewayValue.classList.add("status-muted");
+  }
 }
 
 function renderProbes(probes) {
