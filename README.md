@@ -1,5 +1,8 @@
 # TMHI Gateway Watchdog
 
+[![Docker Hub](https://img.shields.io/badge/Docker%20Hub-kevina1724%2Ftmhi--watchdog-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/kevina1724/tmhi-watchdog)
+[![Docker Hub downloads](https://img.shields.io/docker/pulls/kevina1724/tmhi-watchdog?label=Docker%20Hub%20downloads&logo=docker)](https://hub.docker.com/r/kevina1724/tmhi-watchdog)
+
 A self-hosted Python and Docker watchdog for supported T-Mobile Home Internet gateways.
 
 TMHI Gateway Watchdog checks multiple internet endpoints from inside your home network. If internet access remains down for a configured period while the gateway is still reachable locally, it signs in to the gateway's local API and requests a reboot.
@@ -249,9 +252,20 @@ The response should include:
 
 Perform the first real reboot test only while you are home and can recover the gateway manually.
 
-## Prebuilt GHCR image
+## Prebuilt Docker images
 
-After the package is publicly available, users can deploy the prebuilt image instead of building locally:
+The image is published on Docker Hub:
+
+- Docker Hub: [kevina1724/tmhi-watchdog](https://hub.docker.com/r/kevina1724/tmhi-watchdog)
+- Current Docker Hub downloads: **31** (checked July 17, 2026)
+
+Pull it directly:
+
+```bash
+docker pull kevina1724/tmhi-watchdog:latest
+```
+
+A GHCR image is also available for users who prefer GitHub Container Registry:
 
 ```bash
 docker compose -f deploy/docker-compose.ghcr.yml pull
