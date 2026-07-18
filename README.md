@@ -266,6 +266,39 @@ Pull it directly:
 docker pull kevina1724/tmhi-watchdog:latest
 ```
 
+Or create a `docker-compose.yml` with the prebuilt image:
+
+```yaml
+services:
+  tmhi-watchdog:
+    image: kevina1724/tmhi-watchdog:latest
+    container_name: tmhi-watchdog
+    pull_policy: always
+    restart: unless-stopped
+
+    ports:
+      - "8088:8000"
+
+    volumes:
+      - tmhi_watchdog_data:/data
+
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
+
+volumes:
+  tmhi_watchdog_data:
+    name: tmhi_watchdog_data
+```
+
+Then start it:
+
+```bash
+docker compose up -d
+```
+
 A GHCR image is also available for users who prefer GitHub Container Registry:
 
 ```bash
