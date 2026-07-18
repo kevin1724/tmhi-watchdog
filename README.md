@@ -31,6 +31,7 @@ This targets the failure where phones and computers remain connected to Wi-Fi or
 Version 0.1 supports gateways using the unified `TMI/v1` local API:
 
 - Arcadyan KVD21
+- Arcadyan TMO-G5AR
 - Arcadyan TMOG4AR
 - Sagemcom Fast 5688W
 - Sercomm TMOG4SE
@@ -292,6 +293,9 @@ docker compose -f deploy/docker-compose.ghcr.yml logs -f tmhi-watchdog
 | `MINIMUM_SUCCESSFUL_PROBES` | `2` | Successful probes required to consider internet online |
 
 The app creates `/data/watchdog.env` with all supported settings. `.env.example` is an annotated reference for that generated file.
+The gateway client automatically tries the configured TMI endpoint and the common
+same-host HTTP variants used by supported models, including G5AR's plain
+`http://192.168.12.1/TMI/v1` API.
 
 ## API endpoints
 
@@ -442,6 +446,13 @@ Test from the host:
 ```bash
 curl -v --max-time 10 \
   "http://192.168.12.1:8080/TMI/v1/gateway/?get=all"
+```
+
+For an Arcadyan TMO-G5AR, also test the plain HTTP endpoint:
+
+```bash
+curl -v --max-time 10 \
+  "http://192.168.12.1/TMI/v1/gateway?get=all"
 ```
 
 An HTTP response such as `200` or `401` proves the gateway route is reachable. A timeout generally indicates routing, VLAN, firewall, or gateway-address issues.

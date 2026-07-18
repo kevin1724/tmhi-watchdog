@@ -28,7 +28,7 @@ class UnifiedGatewayClient:
     """Client for Arcadyan/Sagemcom/Sercomm gateways using the TMI v1 API."""
 
     AUTH_PATH = "/auth/login"
-    INFO_PATH = "/gateway/?get=all"
+    INFO_PATHS = ("/gateway/?get=all", "/gateway?get=all")
     REBOOT_PATH = "/gateway/reset?set=reboot"
     NOKIA_STATUS_PATH = "/dashboard_device_status_web_app.cgi"
     NOKIA_INFO_PATH = "/dashboard_device_info_status_web_app.cgi"
@@ -43,6 +43,8 @@ class UnifiedGatewayClient:
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        self._tmi_base_urls = _candidate_tmi_base_urls(self.base_url)
+        self._active_tmi_base_url = self._tmi_base_urls[0]
         self.username = username
         self._password = password
         self._client = httpx.AsyncClient(
@@ -83,33 +85,51 @@ class UnifiedGatewayClient:
         return detection.reachable
 
     async def _detect_unified(self) -> GatewayDetection:
-        try:
-            response = await self._client.get(self.INFO_PATH)
-        except (httpx.HTTPError, OSError) as exc:
+        errors: list[str] = []
+        reachable_error: str | None = None
+        for base_url in self._ordered_tmi_base_urls():
+            for info_path in self.INFO_PATHS:
+                try:
+                    response = await self._client.get(_endpoint_url(base_url, info_path))
+                except (httpx.HTTPError, OSError) as exc:
+                    errors.append(f"{base_url}: {type(exc).__name__}: {exc}")
+                    continue
+
+                if not response.is_success:
+                    error = (
+                        f"{base_url}{info_path}: unified API returned HTTP "
+                        f"{response.status_code}"
+                    )
+                    errors.append(error)
+                    if response.status_code not in {403, 404} and reachable_error is None:
+                        reachable_error = error
+                    continue
+
+                self._active_tmi_base_url = base_url
+                device = _extract_mapping(response, "device")
+                return GatewayDetection(
+                    reachable=True,
+                    api_type="unified",
+                    supported=True,
+                    model=_string_or_none(device.get("model")),
+                    manufacturer=_string_or_none(device.get("manufacturer")),
+                    name=_string_or_none(device.get("friendlyName") or device.get("name")),
+                    error=None,
+                )
+
+        if reachable_error:
             return GatewayDetection(
-                reachable=False,
+                reachable=True,
                 api_type="unified",
                 supported=True,
-                error=f"{type(exc).__name__}: {exc}",
+                error=reachable_error,
             )
 
-        if response.status_code in {403, 404}:
-            return GatewayDetection(
-                reachable=False,
-                api_type="unified",
-                supported=True,
-                error=f"Unified API returned HTTP {response.status_code}",
-            )
-
-        device = _extract_mapping(response, "device")
         return GatewayDetection(
-            reachable=True,
+            reachable=False,
             api_type="unified",
             supported=True,
-            model=_string_or_none(device.get("model")),
-            manufacturer=_string_or_none(device.get("manufacturer")),
-            name=_string_or_none(device.get("friendlyName") or device.get("name")),
-            error=None if response.is_success else f"Unified API returned HTTP {response.status_code}",
+            error=_summarize_errors(errors, "Unified API was not reachable"),
         )
 
     async def _detect_nokia(self) -> GatewayDetection:
@@ -166,43 +186,58 @@ class UnifiedGatewayClient:
         if not self._password:
             raise GatewayAuthenticationError("Gateway password is not configured")
 
-        try:
-            response = await self._client.post(
-                self.AUTH_PATH,
-                json={"username": self.username, "password": self._password},
-                headers={"Content-Type": "application/json"},
-            )
-        except (httpx.HTTPError, OSError) as exc:
-            raise GatewayUnavailableError(
-                f"Could not reach the gateway login API: {type(exc).__name__}"
-            ) from exc
+        errors: list[str] = []
+        auth_problem = False
+        for base_url in self._ordered_tmi_base_urls():
+            try:
+                response = await self._client.post(
+                    _endpoint_url(base_url, self.AUTH_PATH),
+                    json={"username": self.username, "password": self._password},
+                    headers={"Content-Type": "application/json"},
+                )
+            except (httpx.HTTPError, OSError) as exc:
+                errors.append(f"{base_url}: {type(exc).__name__}: {exc}")
+                continue
 
-        if not response.is_success:
-            raise GatewayAuthenticationError(
-                f"Gateway login failed with HTTP {response.status_code}"
-            )
+            if not response.is_success:
+                auth_problem = True
+                errors.append(f"{base_url}: login returned HTTP {response.status_code}")
+                continue
 
-        try:
-            payload: dict[str, Any] = response.json()
-        except ValueError as exc:
-            raise GatewayAuthenticationError(
-                "Gateway login response was not valid JSON"
-            ) from exc
+            try:
+                payload: dict[str, Any] = response.json()
+            except ValueError:
+                auth_problem = True
+                errors.append(f"{base_url}: login response was not valid JSON")
+                continue
 
-        auth = payload.get("auth")
-        token = auth.get("token") if isinstance(auth, dict) else None
-        if not isinstance(token, str) or not token:
+            auth = payload.get("auth")
+            token = auth.get("token") if isinstance(auth, dict) else None
+            if isinstance(token, str) and token:
+                self._active_tmi_base_url = base_url
+                return token
+
             result = payload.get("result")
             message = result.get("message") if isinstance(result, dict) else None
             safe_message = message if isinstance(message, str) else "No token returned"
-            raise GatewayAuthenticationError(f"Gateway login failed: {safe_message}")
-        return token
+            auth_problem = True
+            errors.append(f"{base_url}: {safe_message}")
+
+        if errors:
+            message = _summarize_errors(errors, "Gateway login failed")
+            if auth_problem:
+                raise GatewayAuthenticationError(message)
+            raise GatewayUnavailableError(
+                f"Could not reach the gateway login API: {message}"
+            )
+
+        raise GatewayUnavailableError("Could not reach the gateway login API")
 
     async def reboot(self) -> RebootResult:
         token = await self.authenticate()
         try:
             response = await self._client.post(
-                self.REBOOT_PATH,
+                _endpoint_url(self._active_tmi_base_url, self.REBOOT_PATH),
                 headers={"Authorization": f"Bearer {token}"},
             )
             if response.is_success:
@@ -229,6 +264,62 @@ class UnifiedGatewayClient:
             raise GatewayUnavailableError(
                 f"Could not connect to the gateway reboot API: {type(exc).__name__}"
             ) from exc
+
+    def _ordered_tmi_base_urls(self) -> tuple[str, ...]:
+        return (
+            self._active_tmi_base_url,
+            *(url for url in self._tmi_base_urls if url != self._active_tmi_base_url),
+        )
+
+
+def _endpoint_url(base_url: str, path: str) -> str:
+    return f"{base_url}{path}"
+
+
+def _candidate_tmi_base_urls(base_url: str) -> tuple[str, ...]:
+    normalized = base_url.rstrip("/")
+    parsed = urlparse(normalized)
+    if not parsed.scheme or not parsed.hostname:
+        return (normalized,)
+
+    path = parsed.path.rstrip("/") or "/TMI/v1"
+    ports: list[int | None] = [parsed.port]
+    if parsed.scheme == "http":
+        # G5AR firmware exposes TMI v1 on plain HTTP port 80, while several
+        # other TMHI gateways expose the same API on 8080.
+        ports.extend([None, 8080])
+
+    candidates: list[str] = []
+    for port in ports:
+        candidate = _format_base_url(parsed.scheme, parsed.hostname, port, path)
+        if candidate not in candidates:
+            candidates.append(candidate)
+    return tuple(candidates)
+
+
+def _format_base_url(
+    scheme: str,
+    hostname: str,
+    port: int | None,
+    path: str,
+) -> str:
+    host = hostname
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    default_port = (scheme == "http" and port == 80) or (
+        scheme == "https" and port == 443
+    )
+    netloc = host if port is None or default_port else f"{host}:{port}"
+    return f"{scheme}://{netloc}{path}"
+
+
+def _summarize_errors(errors: list[str], fallback: str) -> str:
+    if not errors:
+        return fallback
+    summary = "; ".join(errors[:3])
+    if len(errors) > 3:
+        summary = f"{summary}; {len(errors) - 3} more attempts failed"
+    return summary
 
 
 def _extract_mapping(response: httpx.Response, key: str) -> dict[str, Any]:
